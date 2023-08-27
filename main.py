@@ -7,39 +7,16 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import numpy as np
 from datetime import datetime
-import asyncio
 
 
 app = FastAPI()
 
 coingecko_base_url = "https://api.coingecko.com/api/v3"
 
-crypto_prices = {}
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 with open("welcome_page.html", "r") as file:
     welcome_page_content = file.read()
-
-
-async def update_crypto_prices():
-    while True:
-        try:
-            response = requests.get(f"{coingecko_base_url}/coins/markets", params={"vs_currency": "usd"})
-            if response.status_code == 200:
-                data = response.json()
-                for crypto in data:
-                    current_price = round(crypto["current_price"], 2)
-                    crypto_prices[crypto["id"]] = current_price
-        except Exception as e:
-            print("Error updating crypto prices:", str(e))
-
-        await asyncio.sleep(5)
-
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(update_crypto_prices())
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -48,15 +25,16 @@ def welcome():
 
 
 @app.get("/cryptos")
-def get_all_cryptos():
+def get_all_cryptos(skip: int = 0, limit: int = 20):
     response = requests.get(f"{coingecko_base_url}/coins/markets", params={"vs_currency": "usd"})
     if response.status_code != 200:
         raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
 
     data = response.json()
-    crypto_list = []
+    total_cryptos = len(data)
 
-    for crypto in data:
+    crypto_list = []
+    for crypto in data[skip: skip + limit]:
         current_price = round(crypto["current_price"], 2)
         crypto_list.append({
             "id": crypto["id"],
@@ -65,7 +43,12 @@ def get_all_cryptos():
             "current_price": current_price
         })
 
-    return JSONResponse(content=crypto_list, headers={"Cache-Control": "no-store, max-age=0"})
+    headers = {
+        "Cache-Control": "no-store, max-age=0",
+        "X-Total-Count": str(total_cryptos)
+    }
+
+    return JSONResponse(content=crypto_list, headers=headers)
 
 
 @app.get("/cryptos/{crypto_name}")
@@ -78,7 +61,8 @@ def get_crypto_data(crypto_name: str):
     data = response.json()
 
     if not data:
-        raise HTTPException(status_code=404, detail="Cryptocurrency not found")
+        raise HTTPException(status_code=404,
+                            detail=f"Cryptocurrency '{crypto_name}' not found")
 
     crypto_info = data[0]
 
@@ -126,6 +110,43 @@ def get_crypto_details(crypto_name: str):
     }
 
     return crypto_details
+
+
+@app.get("/average-volume/{crypto_name}")
+def get_average_volume(crypto_name: str):
+    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
+        "vs_currency": "usd", "days": 30})
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+
+    data = response.json()
+    volumes = [entry[1] for entry in data["total_volumes"]]
+    average_volume = sum(volumes) / len(volumes)
+
+    return {"crypto_id": crypto_name, "average_volume_30_days": round(average_volume, 2)}
+
+
+@app.get("/crypto-exchanges/{crypto_name}")
+def get_crypto_exchanges(crypto_name: str):
+    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}")
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+
+    data = response.json()
+    exchanges = data.get("tickers")
+    if not exchanges:
+        raise HTTPException(status_code=404, detail="Exchange data not available for this cryptocurrency")
+
+    exchange_info = []
+    for exchange in exchanges:
+        exchange_info.append({
+            "exchange_name": exchange["market"]["name"],
+            "base": exchange["base"],
+            "target": exchange["target"],
+            "trade_url": exchange["trade_url"]
+        })
+
+    return exchange_info
 
 
 def calculate_exponential_moving_average(prices, window):
@@ -193,6 +214,9 @@ def get_historical_prices(crypto_name: str):
 
     data = response.json()
     price_data = [{"timestamp": format_timestamp(entry[0]), "price": round(entry[1], 2)} for entry in data["prices"]]
+
+    price_data.reverse()
+
     return {"price_data": price_data}
 
 
@@ -224,11 +248,41 @@ def get_correlation_analysis(crypto_name: str):
     }
 
 
+def calculate_volatility(prices):
+    returns = np.diff(np.log(prices))
+    volatility = np.std(returns) * np.sqrt(252)  # 252 días de trading en un año
+    return volatility
+
+
+@app.get("/volatility-heatmap/{crypto_name}")
+def get_volatility_heatmap(crypto_name: str):
+    response = requests.get(f"{coingecko_base_url}/coins/markets", params={"vs_currency": "usd"})
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+
+    data = response.json()
+
+    # Check if the provided crypto_name exists
+    if not any(crypto["id"] == crypto_name for crypto in data):
+        raise HTTPException(status_code=404, detail="Cryptocurrency not found")
+
+    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
+        "vs_currency": "usd", "days": 90})  # Reduce interval to 90 days
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error when obtaining price data")
+
+    price_data = [entry[1] for entry in response.json()["prices"]]
+    volatility = calculate_volatility(price_data)
+
+    return {"crypto_name": crypto_name, "volatility": volatility}
+
+
 @app.get("/social-sentiment-analysis/{crypto_name}")
 def get_social_sentiment_analysis(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/social_stats")
+    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}")
     if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining social stats")
+        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
 
     data = response.json()
 
@@ -247,3 +301,38 @@ def get_social_sentiment_analysis(crypto_name: str):
         sentiment = "negative"
 
     return {"crypto_id": crypto_name, "sentiment": sentiment, "sentiment_score": sentiment_score}
+
+
+@app.get("/profit-loss-calculator")
+def calculate_profit_loss(crypto_name: str = None, amount: float = None, purchase_price: float = None,
+                          operation: str = None):
+    if not (crypto_name and amount and purchase_price and operation):
+        example_message = \
+            "Example: /profit-loss-calculator?crypto_name=bitcoin&amount=1&purchase_price=50000&operation=long"
+        raise HTTPException(status_code=400,
+                            detail="Please provide the required parameters. " + example_message)
+
+    response = requests.get(f"{coingecko_base_url}/coins/markets", params={"vs_currency": "usd"})
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+
+    data = response.json()
+    current_price = None
+
+    for crypto in data:
+        if crypto["id"] == crypto_name:
+            current_price = crypto["current_price"]
+            break
+
+    if current_price is None:
+        raise HTTPException(status_code=404, detail="Cryptocurrency not found")
+
+    profit_loss = (current_price - purchase_price) * amount
+    if operation == "short":
+        profit_loss = -profit_loss
+
+    profit_loss_status = "profit" if profit_loss >= 0 else "loss"
+    profit_loss = abs(profit_loss) * amount  # Multiply by amount of cryptocurrency bought
+
+    return {"crypto_name": crypto_name, "operation": operation, "current_price": current_price,
+            "profit_loss_status": profit_loss_status, "profit_loss_value": profit_loss}
