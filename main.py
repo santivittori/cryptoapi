@@ -2,12 +2,12 @@
 # Python API
 
 from fastapi import FastAPI, HTTPException
+import feedparser
 import requests
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import numpy as np
 from datetime import datetime
-
 
 app = FastAPI()
 
@@ -110,6 +110,37 @@ def get_crypto_details(crypto_name: str):
     }
 
     return crypto_details
+
+
+def get_formatted_news_from_url(url):
+    feed = feedparser.parse(url)
+    formatted_news = []
+
+    for entry in feed.entries:
+        formatted_news.append({
+            "title": entry.title,
+            "published": entry.published,
+            "link": entry.link,
+            "description": entry.description
+        })
+
+    return formatted_news
+
+
+@app.get("/crypto-news")
+def get_crypto_news():
+    urls = [
+        "https://www.fxempire.com/api/v1/en/articles/rss/news",
+        "https://cointelegraph.com/rss"
+    ]
+
+    all_formatted_news = []
+
+    for url in urls:
+        formatted_news = get_formatted_news_from_url(url)
+        all_formatted_news.extend(formatted_news)
+
+    return all_formatted_news
 
 
 @app.get("/average-volume/{crypto_name}")
