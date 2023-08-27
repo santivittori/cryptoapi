@@ -3,3 +3,4 @@ feedparser==6.0.8
 requests>=2.26.1
 numpy>=1.19.5
 uvicorn==0.15.0
+aiofiles==0.7.0
