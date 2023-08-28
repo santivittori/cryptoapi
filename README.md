@@ -4,14 +4,6 @@
   <p>Your go-to source for real-time cryptocurrency data and insights!</p>
 </div>
 
-<div align="center">
-  <a href="#key-features">Key Features</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#documentation">Documentation</a> •
-  <a href="#examples">Examples</a> •
-  <a href="#license">License</a>
-</div>
-
 ---
 
 ## Key Features
@@ -29,9 +21,3 @@
 🤖 **Sentiment Analysis:** Gain insights into cryptocurrency sentiment based on social media statistics.
 
 🔄 **Correlation Analysis:** Evaluate correlations between selected cryptocurrencies and major players like Bitcoin and Ethereum.
-
-## Usage
-
-1. **Clone the Repository:**
-   ```sh
-   git clone https://github.com/your-username/CryptoAPI.git
