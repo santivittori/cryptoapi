@@ -18,6 +18,22 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 with open("welcome_page.html", "r") as file:
     welcome_page_content = file.read()
 
+crypto_cache = {}
+
+
+def get_response(url, cache_key, params=None):
+    if cache_key in crypto_cache:
+        return crypto_cache[cache_key]
+
+    response = requests.get(url, params=params)
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error when obtaining data")
+
+    data = response.json()
+    crypto_cache[cache_key] = data
+
+    return data
+
 
 @app.get("/", response_class=HTMLResponse)
 def welcome():
@@ -26,11 +42,8 @@ def welcome():
 
 @app.get("/cryptos")
 def get_all_cryptos(skip: int = 0, limit: int = 20):
-    response = requests.get(f"{coingecko_base_url}/coins/markets", params={"vs_currency": "usd"})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/markets", "cryptos", params={"vs_currency": "usd"})
 
-    data = response.json()
     total_cryptos = len(data)
 
     crypto_list = []
@@ -53,16 +66,11 @@ def get_all_cryptos(skip: int = 0, limit: int = 20):
 
 @app.get("/cryptos/{crypto_name}")
 def get_crypto_data(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/markets",
-                            params={"ids": crypto_name, "vs_currency": "usd"})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
-
-    data = response.json()
+    data = get_response(f"{coingecko_base_url}/coins/markets", f"crypto_data_{crypto_name}",
+                        params={"ids": crypto_name, "vs_currency": "usd"})
 
     if not data:
-        raise HTTPException(status_code=404,
-                            detail=f"Cryptocurrency '{crypto_name}' not found")
+        raise HTTPException(status_code=404, detail=f"Cryptocurrency '{crypto_name}' not found")
 
     crypto_info = data[0]
 
@@ -82,11 +90,7 @@ def get_crypto_data(crypto_name: str):
 
 @app.get("/cryptos/{crypto_name}/details")
 def get_crypto_details(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}")
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
-
-    data = response.json()
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}", f"crypto_details_{crypto_name}")
 
     current_price = round(data["market_data"]["current_price"]["usd"], 2)
 
@@ -137,7 +141,7 @@ def get_crypto_news():
     all_formatted_news = []
 
     for url in urls:
-        formatted_news = get_formatted_news_from_url(url)
+        formatted_news = get_response(url, f"news_{url}")
         all_formatted_news.extend(formatted_news)
 
     return all_formatted_news
@@ -145,12 +149,9 @@ def get_crypto_news():
 
 @app.get("/average-volume/{crypto_name}")
 def get_average_volume(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
-        "vs_currency": "usd", "days": 30})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", f"average_volume_{crypto_name}",
+                        params={"vs_currency": "usd", "days": 30})
 
-    data = response.json()
     volumes = [entry[1] for entry in data["total_volumes"]]
     average_volume = sum(volumes) / len(volumes)
 
@@ -159,11 +160,8 @@ def get_average_volume(crypto_name: str):
 
 @app.get("/crypto-exchanges/{crypto_name}")
 def get_crypto_exchanges(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}")
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}", f"crypto_exchanges_{crypto_name}")
 
-    data = response.json()
     exchanges = data.get("tickers")
     if not exchanges:
         raise HTTPException(status_code=404, detail="Exchange data not available for this cryptocurrency")
@@ -189,12 +187,9 @@ def calculate_exponential_moving_average(prices, window):
 
 @app.get("/short-term/{crypto_name}")
 def get_short_term_signal(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
-        "vs_currency": "usd", "days": 1})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}/market_chart",
+                        f"short_term_signal_{crypto_name}", params={"vs_currency": "usd", "days": 1})
 
-    data = response.json()
     prices = [entry[1] for entry in data["prices"]]
     ema_20 = calculate_exponential_moving_average(prices, window=20)
     current_price = prices[-1]
@@ -211,12 +206,9 @@ def get_short_term_signal(crypto_name: str):
 
 @app.get("/long-term/{crypto_name}")
 def get_long_term_signal(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
-        "vs_currency": "usd", "days": 1})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}/market_chart",
+                        f"long_term_signal_{crypto_name}", params={"vs_currency": "usd", "days": 1})
 
-    data = response.json()
     prices = [entry[1] for entry in data["prices"]]
     ema_200 = calculate_exponential_moving_average(prices, window=200)
     current_price = prices[-1]
@@ -238,14 +230,10 @@ def format_timestamp(timestamp):
 
 @app.get("/historical-prices/{crypto_name}")
 def get_historical_prices(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
-        "vs_currency": "usd", "days": 30})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}/market_chart",
+                        f"historical_prices_{crypto_name}", params={"vs_currency": "usd", "days": 30})
 
-    data = response.json()
     price_data = [{"timestamp": format_timestamp(entry[0]), "price": round(entry[1], 2)} for entry in data["prices"]]
-
     price_data.reverse()
 
     return {"price_data": price_data}
@@ -253,20 +241,17 @@ def get_historical_prices(crypto_name: str):
 
 @app.get("/correlation-analysis/{crypto_name}")
 def get_correlation_analysis(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
-        "vs_currency": "usd", "days": 180})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}/market_chart",
+                        f"correlation_analysis_{crypto_name}", params={"vs_currency": "usd", "days": 180})
 
-    data = response.json()
     prices = [entry[1] for entry in data["prices"]]
 
-    btc_data = requests.get(f"{coingecko_base_url}/coins/bitcoin/market_chart", params={
-        "vs_currency": "usd", "days": 180}).json()
+    btc_data = get_response(f"{coingecko_base_url}/coins/bitcoin/market_chart",
+                            "correlation_analysis_bitcoin", params={"vs_currency": "usd", "days": 180})
     btc_prices = [entry[1] for entry in btc_data["prices"]]
 
-    eth_data = requests.get(f"{coingecko_base_url}/coins/ethereum/market_chart", params={
-        "vs_currency": "usd", "days": 180}).json()
+    eth_data = get_response(f"{coingecko_base_url}/coins/ethereum/market_chart",
+                            "correlation_analysis_ethereum", params={"vs_currency": "usd", "days": 180})
     eth_prices = [entry[1] for entry in eth_data["prices"]]
 
     correlation_with_btc = np.corrcoef(prices, btc_prices)[0, 1]
@@ -287,23 +272,17 @@ def calculate_volatility(prices):
 
 @app.get("/volatility-heatmap/{crypto_name}")
 def get_volatility_heatmap(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/markets", params={"vs_currency": "usd"})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
-
-    data = response.json()
+    data = get_response(f"{coingecko_base_url}/coins/markets",
+                        "volatility_heatmap_market", params={"vs_currency": "usd"})
 
     # Check if the provided crypto_name exists
     if not any(crypto["id"] == crypto_name for crypto in data):
         raise HTTPException(status_code=404, detail="Cryptocurrency not found")
 
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}/market_chart", params={
-        "vs_currency": "usd", "days": 90})  # Reduce interval to 90 days
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}/market_chart",
+                        f"volatility_heatmap_{crypto_name}", params={"vs_currency": "usd", "days": 90})
 
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining price data")
-
-    price_data = [entry[1] for entry in response.json()["prices"]]
+    price_data = [entry[1] for entry in data["prices"]]
     volatility = calculate_volatility(price_data)
 
     return {"crypto_name": crypto_name, "volatility": volatility}
@@ -311,11 +290,8 @@ def get_volatility_heatmap(crypto_name: str):
 
 @app.get("/social-sentiment-analysis/{crypto_name}")
 def get_social_sentiment_analysis(crypto_name: str):
-    response = requests.get(f"{coingecko_base_url}/coins/{crypto_name}")
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
-
-    data = response.json()
+    data = get_response(f"{coingecko_base_url}/coins/{crypto_name}",
+                        f"social_sentiment_analysis_{crypto_name}")
 
     if "sentiment_votes_up_percentage" not in data or "sentiment_votes_down_percentage" not in data:
         raise HTTPException(status_code=404, detail="Sentiment data not available")
@@ -343,13 +319,10 @@ def calculate_profit_loss(crypto_name: str = None, amount: float = None, purchas
         raise HTTPException(status_code=400,
                             detail="Please provide the required parameters. " + example_message)
 
-    response = requests.get(f"{coingecko_base_url}/coins/markets", params={"vs_currency": "usd"})
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error when obtaining cryptocurrency data")
+    data = get_response(f"{coingecko_base_url}/coins/markets",
+                        "profit_loss_calculator_market", params={"vs_currency": "usd"})
 
-    data = response.json()
     current_price = None
-
     for crypto in data:
         if crypto["id"] == crypto_name:
             current_price = crypto["current_price"]
